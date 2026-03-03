@@ -189,11 +189,12 @@ def draw_smooth_module(
     y0: int,
     size: int,
     radius: int,
+    corners: tuple[bool, bool, bool, bool] | None = None,
 ) -> None:
     """Round only the exposed corners while keeping adjacent modules connected."""
     x1 = x0 + size - 1
     y1 = y0 + size - 1
-    draw.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill="black")
+    draw.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill="black", corners=corners)
 
     if radius <= 0:
         return
@@ -238,10 +239,15 @@ def render_qr_image(qr: qrcode.QRCode, style: str, softness: float) -> Image.Ima
             elif module_style == "rounded":
                 draw.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill="black")
             elif module_style == "diag_rounded":
-                draw.rounded_rectangle(
-                    (x0, y0, x1, y1),
+                draw_smooth_module(
+                    draw=draw,
+                    matrix=matrix,
+                    row=row,
+                    col=col,
+                    x0=x0,
+                    y0=y0,
+                    size=qr.box_size,
                     radius=radius,
-                    fill="black",
                     corners=(False, True, False, True),
                 )
             elif module_style == "dot":
@@ -361,7 +367,7 @@ def main() -> None:
         "--softness",
         type=float,
         default=DEFAULT_SOFTNESS,
-        help="Corner softness for rounded/smooth styles in range [0.0, 0.5].",
+        help="Corner softness for rounded/smooth/diag_rounded styles in range [0.0, 0.5].",
     )
     args = parser.parse_args()
     if not (0.0 <= args.softness <= 0.5):

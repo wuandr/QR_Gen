@@ -40,7 +40,7 @@ python generate_qr.py <url> [-o output_file] [--image filename] [--style square|
 | `-o` / `--output` | Output filename (default: `qrcode.png`). Format inferred from extension. |
 | `--image` | Overlay an image from the project root (example: `test_cat_face_1024.ppm`). Max size: `1024x1024` with auto-downscaling. Uses adaptive sizing with decode validation and locks inner fill ratio to `1`. |
 | `--style` | Raster module style: `square` (default), `rounded`, `dot`, `smooth`, `diag_rounded` (only top-right and bottom-left corners rounded). Finder patterns stay square for scan reliability. |
-| `--softness` | Corner softness for `rounded`/`smooth` styles in `[0.0, 0.5]` (default: `0.35`). |
+| `--softness` | Corner softness for `rounded`/`smooth`/`diag_rounded` styles in `[0.0, 0.5]` (default: `0.35`). |
 
 ### Examples
 
@@ -62,7 +62,7 @@ python generate_qr.py https://example.com -o mycode_rounded.png --style rounded 
 # Connected soft corners (fewer isolated gaps than plain rounded)
 python generate_qr.py https://example.com -o mycode_smooth.png --style smooth --softness 0.35
 
-# Only top-right and bottom-left corners rounded per module
+# Only top-right and bottom-left corners rounded per module (with smooth joining)
 python generate_qr.py https://example.com -o mycode_diag_rounded.png --style diag_rounded --softness 0.4
 ```
 
