@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw
 
 
 SUPPORTED_FORMATS = {"png", "jpeg", "jpg", "svg"}
-SUPPORTED_STYLES = {"square", "rounded", "dot", "smooth"}
+SUPPORTED_STYLES = {"square", "rounded", "dot", "smooth", "diag_rounded"}
 MAX_OVERLAY_IMAGE_SIDE = 1024
 DEFAULT_BORDER = 4
 DEFAULT_BOX_SIZE = 10
@@ -237,6 +237,13 @@ def render_qr_image(qr: qrcode.QRCode, style: str, softness: float) -> Image.Ima
                 draw.rectangle((x0, y0, x1, y1), fill="black")
             elif module_style == "rounded":
                 draw.rounded_rectangle((x0, y0, x1, y1), radius=radius, fill="black")
+            elif module_style == "diag_rounded":
+                draw.rounded_rectangle(
+                    (x0, y0, x1, y1),
+                    radius=radius,
+                    fill="black",
+                    corners=(False, True, False, True),
+                )
             elif module_style == "dot":
                 diameter = max(2, int(qr.box_size * 0.82))
                 inset = (qr.box_size - diameter) // 2
@@ -345,7 +352,10 @@ def main() -> None:
         "--style",
         choices=sorted(SUPPORTED_STYLES),
         default=DEFAULT_STYLE,
-        help="Module rendering style for raster outputs: square, rounded, dot, or smooth.",
+        help=(
+            "Module rendering style for raster outputs: square, rounded, dot, smooth, "
+            "or diag_rounded (top-right + bottom-left corners rounded)."
+        ),
     )
     parser.add_argument(
         "--softness",
