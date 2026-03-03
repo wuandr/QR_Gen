@@ -38,7 +38,7 @@ python generate_qr.py <url> [-o output_file] [--image filename]
 |------|-------------|
 | `url` | The URL to encode |
 | `-o` / `--output` | Output filename (default: `qrcode.png`). Format inferred from extension. |
-| `--image` | Overlay an image from the project root (example: `test_cat_face_1024.ppm`). Max size: `1024x1024`. Uses adaptive sizing with decode validation and locks inner fill ratio to `0.9`. |
+| `--image` | Overlay an image from the project root (example: `test_cat_face_1024.ppm`). Max size: `1024x1024` with auto-downscaling. Uses adaptive sizing with decode validation and locks inner fill ratio to `1`. |
 
 ### Examples
 
@@ -57,7 +57,7 @@ python generate_qr.py https://example.com -o mycode.svg
 
 ## Test Image
 
-This repo includes `test_cat_face_1024.ppm`, a cute cat-face test image at the largest supported image size (`1024x1024`).
+This repo includes `test_cat_face_1024.ppm`, a test image at the largest supported image size (`1024x1024`).
 
 ## Overlay Sizing
 
