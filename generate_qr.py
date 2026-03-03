@@ -43,11 +43,16 @@ def load_overlay_image(overlay_path: str) -> Image.Image:
 
     width, height = overlay.size
     if width > MAX_OVERLAY_IMAGE_SIDE or height > MAX_OVERLAY_IMAGE_SIDE:
-        print(
-            f"Error: image '{resolved.name}' is {width}x{height}. "
-            f"Maximum supported size is {MAX_OVERLAY_IMAGE_SIDE}x{MAX_OVERLAY_IMAGE_SIDE}."
+        scale = min(MAX_OVERLAY_IMAGE_SIDE / width, MAX_OVERLAY_IMAGE_SIDE / height)
+        new_size = (
+            max(1, int(width * scale)),
+            max(1, int(height * scale)),
         )
-        sys.exit(1)
+        overlay = overlay.resize(new_size, Image.Resampling.LANCZOS)
+        print(
+            f"Info: downscaled image '{resolved.name}' from {width}x{height} "
+            f"to {new_size[0]}x{new_size[1]}."
+        )
 
     return overlay
 
@@ -205,7 +210,7 @@ def main() -> None:
         "--image",
         help=(
             "Overlay image filename in project root (e.g. test_cat_face_1024.ppm). "
-            f"Max image size: {MAX_OVERLAY_IMAGE_SIDE}x{MAX_OVERLAY_IMAGE_SIDE}."
+            f"Oversized images are downscaled to max {MAX_OVERLAY_IMAGE_SIDE}x{MAX_OVERLAY_IMAGE_SIDE}."
         ),
     )
     args = parser.parse_args()
