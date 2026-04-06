@@ -10,9 +10,6 @@ on:
         description: Release title shown on GitHub
         required: false
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 permissions:
   contents: write
 
@@ -102,7 +99,7 @@ jobs:
 
     steps:
       - name: Download release archives
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           path: release-assets
 
