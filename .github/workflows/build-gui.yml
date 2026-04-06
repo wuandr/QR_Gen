@@ -24,17 +24,14 @@ jobs:
             archive_name: qr-generator-linux-x64
             smoke_path: ./dist/QR_Generator/QR_Generator
             test_command: xvfb-run -a python -m unittest discover -s tests -v
-            zip_command: zip -r "${{ github.workspace }}/${{ matrix.archive_name }}.zip" QR_Generator
           - os: windows-latest
             archive_name: qr-generator-windows-x64
             smoke_path: .\dist\QR_Generator\QR_Generator.exe
             test_command: python -m unittest discover -s tests -v
-            zip_command: Compress-Archive -Path dist\QR_Generator\* -DestinationPath $env:GITHUB_WORKSPACE\${{ matrix.archive_name }}.zip -Force
           - os: macos-14
             archive_name: qr-generator-macos-arm64
             smoke_path: ./dist/QR_Generator.app/Contents/MacOS/QR_Generator
             test_command: python -m unittest discover -s tests -v
-            zip_command: ditto -c -k --sequesterRsrc --keepParent QR_Generator.app "${{ github.workspace }}/${{ matrix.archive_name }}.zip"
 
     steps:
       - uses: actions/checkout@v4
@@ -78,17 +75,17 @@ jobs:
       - name: Create Linux release archive
         if: runner.os == 'Linux'
         working-directory: dist
-        run: ${{ matrix.zip_command }}
+        run: zip -r "${{ github.workspace }}/${{ matrix.archive_name }}.zip" QR_Generator
 
       - name: Create macOS release archive
         if: runner.os == 'macOS'
         working-directory: dist
-        run: ${{ matrix.zip_command }}
+        run: ditto -c -k --sequesterRsrc --keepParent QR_Generator.app "${{ github.workspace }}/${{ matrix.archive_name }}.zip"
 
       - name: Create Windows release archive
         if: runner.os == 'Windows'
         shell: powershell
-        run: ${{ matrix.zip_command }}
+        run: Compress-Archive -Path dist\QR_Generator\* -DestinationPath $env:GITHUB_WORKSPACE\${{ matrix.archive_name }}.zip -Force
 
       - name: Upload release archive
         uses: actions/upload-artifact@v4
