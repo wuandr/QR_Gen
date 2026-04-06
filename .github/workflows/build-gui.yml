@@ -34,9 +34,9 @@ jobs:
             test_command: python -m unittest discover -s tests -v
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -88,7 +88,7 @@ jobs:
         run: Compress-Archive -Path dist\QR_Generator\* -DestinationPath $env:GITHUB_WORKSPACE\${{ matrix.archive_name }}.zip -Force
 
       - name: Upload release archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.archive_name }}
           path: ${{ github.workspace }}/${{ matrix.archive_name }}.zip
@@ -99,7 +99,7 @@ jobs:
 
     steps:
       - name: Download release archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: release-assets
 
