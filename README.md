@@ -1,6 +1,6 @@
 # QR Code Generator
 
-A simple Python script that generates a QR code from a URL and exports it as an image.
+A cross-platform QR code generator with both a Python CLI and a Tkinter desktop GUI.
 
 ## Supported Formats
 
@@ -28,7 +28,23 @@ To deactivate the venv when you're done:
 deactivate
 ```
 
-## Usage
+## Desktop App
+
+Launch the GUI:
+
+```bash
+python qr_gui.py
+```
+
+The GUI supports:
+- URL entry
+- PNG, JPEG, and SVG output
+- Raster style selection
+- Softness control for rounded styles
+- Optional overlay image selection from anywhere on disk
+- Raster preview before save
+
+## CLI Usage
 
 ```bash
 python generate_qr.py <url> [-o output_file] [--image filename] [--style square|rounded|dot|smooth|diag_rounded] [--softness 0.35]
@@ -77,3 +93,19 @@ When `--image` is provided, the script now:
 - Decodes each candidate QR with OpenCV.
 - Auto-adjusts quiet-zone border for OpenCV decode stability when needed.
 - Automatically backs off to the largest size that still decodes to the exact URL.
+
+## Packaging
+
+Build the desktop app with PyInstaller:
+
+```bash
+python -m pip install pyinstaller
+python -m PyInstaller --noconfirm --clean qr_gui.spec
+```
+
+Artifacts are created in `dist/`:
+- Linux: `dist/QR_Generator/`
+- Windows: `dist/QR_Generator/`
+- macOS: `dist/QR_Generator.app`
+
+GitHub Actions builds GUI artifacts for Linux x64, Windows x64, and macOS Apple Silicon using `.github/workflows/build-gui.yml`.

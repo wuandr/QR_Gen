@@ -3,3 +3,6 @@
 *.png
 *.svg
 *.jpg
+build/
+dist/
+__pycache__/
