@@ -78,6 +78,30 @@ class QRGuiTests(unittest.TestCase):
     def _is_visible(widget) -> bool:
         return bool(widget.winfo_manager())
 
+    def _map_window(self) -> None:
+        """setUp withdraws the window, and a withdrawn toplevel gets no real
+        geometry on Windows — winfo_height() stays 1 no matter how many times
+        you update(). Tests that measure laid-out sizes have to map it first.
+
+        No need to withdraw it again — tearDown destroys the window straight
+        after, and an addCleanup would run too late to find it alive."""
+        self.root.deiconify()
+        if not self._settle(lambda: self.root.winfo_ismapped() and self.root.winfo_height() > 1):
+            self.skipTest("the window manager never mapped the window")
+
+    def _resize_to(self, width: int, height: int) -> None:
+        """A window manager applies geometry when it feels like it, not on the
+        next update(), so wait for the size to land before measuring against it."""
+        self.root.geometry(f"{width}x{height}")
+        self._settle(lambda: self.root.winfo_height() == height)
+
+    def _settle(self, done) -> bool:
+        for _ in range(200):
+            self.root.update()
+            if done():
+                return True
+        return False
+
     # ------------------------------------------------------------- defaults
 
     def test_window_defaults(self) -> None:
@@ -115,11 +139,12 @@ class QRGuiTests(unittest.TestCase):
         shortest: picking a rounded style swapped a one-line reason for the
         taller rounding slider and pushed the last hint out of view."""
         form = self.app.url_entry.master
+        self._map_window()
         for language in ("en", "zh_TW"):
             self.app.set_language(language)
             self.root.update_idletasks()
             width, height = self.root.wm_minsize()
-            self.root.geometry(f"{width}x{height}")
+            self._resize_to(width, height)
             for output_format in ALL_FORMATS:
                 for style in STYLES:
                     with self.subTest(language=language, format=output_format, style=style):
