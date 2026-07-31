@@ -21,23 +21,23 @@ Intel Macs are not covered by this build.
 ## Mac
 
 1. Download the zip and double-click it to unpack `QR_Generator.app`.
-2. Drag the app to your Applications folder (optional, but tidier).
-3. **Right-click the app and choose Open**, then click Open again in the dialog
-   that appears.
+2. Drag the app into your Applications folder.
+3. Double-click the app. macOS will refuse to open it and say it can't verify
+   the developer. **This is expected** — click **Done**.
+4. Open **System Settings → Privacy & Security** and scroll down to the
+   **Security** section. There'll be a line saying QR_Generator was blocked,
+   with an **Open Anyway** button. Click it.
+5. Confirm with your password or Touch ID.
 
-Double-clicking the app the first time will not work. This app isn't signed with
-an Apple developer certificate, so macOS blocks it by default — right-click →
-Open is how you tell macOS you trust it. You only need to do this once; after
-that it opens normally.
+After that the app opens normally by double-clicking, like anything else. You
+only go through this once.
 
-If macOS says the app is damaged or can't be opened, open Terminal, run this,
-then try again:
+**Do step 3 first.** The Open Anyway button doesn't appear in System Settings
+until macOS has blocked the app at least once — go looking for it beforehand and
+the Security section will be empty.
 
-```bash
-xattr -dr com.apple.quarantine /Applications/QR_Generator.app
-```
-
-Adjust the path if you kept the app somewhere other than Applications.
+This happens because the app isn't signed with a paid Apple developer
+certificate, so macOS treats it as unverified rather than trusted.
 
 ## Windows
 
@@ -98,21 +98,20 @@ Prefer to run from source? See the
 ## Mac
 
 1. 下載 zip 檔後點兩下解壓縮，會得到 `QR_Generator.app`。
-2. 可以把它拖到「應用程式」資料夾（非必要，但比較整齊）。
-3. **在 App 上按右鍵，選擇「打開」**，然後在跳出的對話框中再按一次「打開」。
+2. 把它拖到「應用程式」資料夾。
+3. 點兩下打開 App。macOS 會拒絕開啟，並顯示無法驗證開發者的訊息。
+   **這是正常的**，請按 **「完成」**。
+4. 打開 **「系統設定」→「隱私權與安全性」**，往下捲到 **「安全性」** 區塊，
+   會看到一行說明 QR_Generator 已被阻擋，旁邊有 **「仍要打開」** 按鈕，請點它。
+5. 用密碼或 Touch ID 確認。
 
-第一次直接點兩下是打不開的。這個 App 沒有經過 Apple 開發者簽章，macOS 預設會
-擋下來，而按右鍵選「打開」就是告訴 macOS 你信任它。這個步驟只需要做一次，之後
-就能正常開啟。
+完成後，之後就能像一般 App 一樣點兩下直接開啟。這個步驟只需要做一次。
 
-如果 macOS 顯示 App 已損毀或無法打開，請開啟「終端機」執行以下指令，然後再試
-一次：
+**請務必先做步驟 3。** 一定要先試著打開 App、被 macOS 擋下來之後，「系統設定」
+裡才會出現「仍要打開」的按鈕；如果先去「系統設定」找，「安全性」區塊會是空的。
 
-```bash
-xattr -dr com.apple.quarantine /Applications/QR_Generator.app
-```
-
-如果 App 放在「應用程式」以外的位置，請自行調整路徑。
+會這樣是因為這個 App 沒有經過 Apple 付費開發者簽章，macOS 會將它視為未經驗證
+的軟體。
 
 ## Windows
 
