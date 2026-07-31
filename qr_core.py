@@ -14,6 +14,15 @@ SUPPORTED_STYLES = {"square", "rounded", "dot", "smooth", "diag_rounded"}
 MAX_OVERLAY_IMAGE_SIDE = 1024
 DEFAULT_BORDER = 4
 DEFAULT_BOX_SIZE = 10
+MIN_BOX_SIZE = 1
+MAX_BOX_SIZE = 100
+# Named sizes shared by the GUI and the CLI. Values are qrcode box sizes in
+# pixels per module; a short URL renders at 33 modules, so 10/20/40 give
+# roughly 330/660/1320 px squares.
+BOX_SIZE_PRESETS = {"small": 10, "medium": 20, "large": 40}
+# Pillow encoder names. Passed to Image.save explicitly so the requested format
+# wins even when the output filename carries a different extension.
+PIL_ENCODERS = {"png": "PNG", "jpg": "JPEG", "jpeg": "JPEG"}
 DEFAULT_STYLE = "square"
 DEFAULT_SOFTNESS = 0.35
 INNER_FILL_RATIO = 1
@@ -24,28 +33,57 @@ OverlayScope = Literal["project_root", "any"]
 
 
 class QRGenerationError(ValueError):
-    """Raised when the QR request cannot be completed."""
+    """Raised when the QR request cannot be completed.
+
+    Carries a stable ``code`` alongside the English message so callers can map
+    the failure onto their own copy instead of matching on the message text.
+    """
+
+    def __init__(self, message: str, code: str = "unknown", **params: object) -> None:
+        super().__init__(message)
+        self.code = code
+        self.params = params
+
+
+class Notice(str):
+    """An informational engine message that also carries a code and params.
+
+    Subclasses ``str`` so existing consumers (the CLI, logs) keep working while
+    the GUI reads ``code``/``params`` to render translated copy.
+    """
+
+    code: str
+    params: dict[str, object]
+
+    def __new__(cls, code: str, text: str, **params: object) -> "Notice":
+        notice = super().__new__(cls, text)
+        notice.code = code
+        notice.params = params
+        return notice
 
 
 @dataclass(frozen=True)
 class QRRequest:
     url: str
-    output_path: str | Path
+    output_path: str | Path | None = None
     overlay_path: str | None = None
     style: str = DEFAULT_STYLE
     softness: float = DEFAULT_SOFTNESS
     overlay_scope: OverlayScope = "project_root"
+    output_format: str | None = None
+    box_size: int = DEFAULT_BOX_SIZE
 
 
 @dataclass(frozen=True)
 class ValidatedQRRequest:
     url: str
-    output_path: Path
+    output_path: Path | None
     output_format: str
     overlay_path: str | None
     style: str
     softness: float
     overlay_scope: OverlayScope
+    box_size: int = DEFAULT_BOX_SIZE
 
 
 @dataclass
@@ -57,45 +95,88 @@ class OverlayLoadResult:
 
 @dataclass
 class QRGenerationResult:
-    output_path: Path
+    output_path: Path | None
     output_format: str
     messages: list[str] = field(default_factory=list)
     preview_image: Image.Image | None = None
+    pixel_size: tuple[int, int] | None = None
 
 
-def validate_request(request: QRRequest) -> ValidatedQRRequest:
+def validate_request(request: QRRequest, *, require_output_path: bool = True) -> ValidatedQRRequest:
     url = request.url.strip()
     if not url:
-        raise QRGenerationError("URL is required.")
+        raise QRGenerationError("URL is required.", code="url_required")
 
-    output_path = Path(request.output_path).expanduser()
-    output_format = output_path.suffix.lstrip(".").lower()
-    if not output_format:
+    output_path = Path(request.output_path).expanduser() if request.output_path is not None else None
+    if output_path is None and require_output_path:
+        raise QRGenerationError("An output path is required.", code="output_path_required")
+
+    if request.output_format is not None:
+        output_format = request.output_format.strip().lstrip(".").lower()
+    elif output_path is not None:
+        output_format = output_path.suffix.lstrip(".").lower()
+        if not output_format:
+            raise QRGenerationError(
+                f"Could not determine format from '{output_path}'. Use an extension like .png, .jpg, or .svg.",
+                code="format_unknown",
+                path=str(output_path),
+            )
+    else:
         raise QRGenerationError(
-            f"Could not determine format from '{output_path}'. Use an extension like .png, .jpg, or .svg."
+            "An output format is required when no output path is given.", code="format_required"
         )
+
     if output_format not in SUPPORTED_FORMATS:
         supported = ", ".join(sorted(SUPPORTED_FORMATS))
-        raise QRGenerationError(f"Unsupported format '{output_format}'. Choose from: {supported}.")
+        raise QRGenerationError(
+            f"Unsupported format '{output_format}'. Choose from: {supported}.",
+            code="format_unsupported",
+            format=output_format,
+        )
 
-    output_dir = output_path.parent
-    if not output_dir.exists():
-        raise QRGenerationError(f"Output directory does not exist: {output_dir}")
+    if output_path is not None:
+        output_dir = output_path.parent
+        if not output_dir.exists():
+            raise QRGenerationError(
+                f"Output directory does not exist: {output_dir}",
+                code="folder_missing",
+                folder=str(output_dir),
+            )
+
+    try:
+        box_size = int(request.box_size)
+    except (TypeError, ValueError) as exc:
+        raise QRGenerationError(
+            f"Size must be a whole number between {MIN_BOX_SIZE} and {MAX_BOX_SIZE}.", code="size_invalid"
+        ) from exc
+
+    if not (MIN_BOX_SIZE <= box_size <= MAX_BOX_SIZE):
+        raise QRGenerationError(
+            f"Size must be between {MIN_BOX_SIZE} and {MAX_BOX_SIZE}.", code="size_invalid"
+        )
 
     if request.style not in SUPPORTED_STYLES:
         supported = ", ".join(sorted(SUPPORTED_STYLES))
-        raise QRGenerationError(f"Unsupported style '{request.style}'. Choose from: {supported}.")
+        raise QRGenerationError(
+            f"Unsupported style '{request.style}'. Choose from: {supported}.",
+            code="style_unsupported",
+            style=request.style,
+        )
 
     try:
         softness = float(request.softness)
     except (TypeError, ValueError) as exc:
-        raise QRGenerationError("Softness must be a number between 0.0 and 0.5.") from exc
+        raise QRGenerationError(
+            "Softness must be a number between 0.0 and 0.5.", code="softness_invalid"
+        ) from exc
 
     if not (0.0 <= softness <= 0.5):
-        raise QRGenerationError("Softness must be between 0.0 and 0.5.")
+        raise QRGenerationError("Softness must be between 0.0 and 0.5.", code="softness_invalid")
 
     if request.overlay_scope not in ("project_root", "any"):
-        raise QRGenerationError(f"Unsupported overlay scope '{request.overlay_scope}'.")
+        raise QRGenerationError(
+            f"Unsupported overlay scope '{request.overlay_scope}'.", code="overlay_scope_invalid"
+        )
 
     return ValidatedQRRequest(
         url=url,
@@ -105,6 +186,7 @@ def validate_request(request: QRRequest) -> ValidatedQRRequest:
         style=request.style,
         softness=softness,
         overlay_scope=request.overlay_scope,
+        box_size=box_size,
     )
 
 
@@ -119,16 +201,23 @@ def resolve_overlay_path(
     if overlay_scope == "project_root":
         project_root = (project_root or Path.cwd()).resolve()
         if raw.is_absolute():
-            raise QRGenerationError("--image must be a filename in the project root, not an absolute path.")
+            raise QRGenerationError(
+                "--image must be a filename in the project root, not an absolute path.",
+                code="image_scope_invalid",
+            )
 
         candidate = (project_root / raw).resolve()
         if candidate.parent != project_root:
-            raise QRGenerationError("--image must point to a file directly in the project root.")
+            raise QRGenerationError(
+                "--image must point to a file directly in the project root.", code="image_scope_invalid"
+            )
     else:
         candidate = raw.resolve()
 
     if not candidate.is_file():
-        raise QRGenerationError(f"Image file not found: {candidate}")
+        raise QRGenerationError(
+            f"Image file not found: {candidate}", code="image_not_found", path=str(candidate)
+        )
 
     return candidate
 
@@ -147,7 +236,9 @@ def load_overlay_image(
     try:
         overlay = Image.open(resolved).convert("RGBA")
     except Exception as exc:
-        raise QRGenerationError(f"Failed to open image '{resolved.name}': {exc}") from exc
+        raise QRGenerationError(
+            f"Failed to open image '{resolved.name}': {exc}", code="image_unreadable", name=resolved.name
+        ) from exc
 
     messages: list[str] = []
     width, height = overlay.size
@@ -159,7 +250,13 @@ def load_overlay_image(
         )
         overlay = overlay.resize(new_size, Image.Resampling.LANCZOS)
         messages.append(
-            f"Info: downscaled image '{resolved.name}' from {width}x{height} to {new_size[0]}x{new_size[1]}."
+            Notice(
+                "image_downscaled",
+                f"Info: downscaled image '{resolved.name}' from {width}x{height} to {new_size[0]}x{new_size[1]}.",
+                name=resolved.name,
+                w=new_size[0],
+                h=new_size[1],
+            )
         )
 
     return OverlayLoadResult(image=overlay, path=resolved, messages=messages)
@@ -172,7 +269,8 @@ def can_decode_to_url(candidate_img: Image.Image, expected_url: str) -> bool:
         import numpy as np
     except ImportError as exc:
         raise QRGenerationError(
-            "OpenCV is required for adaptive overlay sizing. Install dependency: opencv-python-headless"
+            "OpenCV is required for adaptive overlay sizing. Install dependency: opencv-python-headless",
+            code="opencv_missing",
         ) from exc
 
     detector = cv2.QRCodeDetector()
@@ -262,11 +360,11 @@ def place_largest_validated_overlay(
     return None
 
 
-def build_qr(url: str, error_correction: int, border: int) -> qrcode.QRCode:
+def build_qr(url: str, error_correction: int, border: int, box_size: int = DEFAULT_BOX_SIZE) -> qrcode.QRCode:
     qr = qrcode.QRCode(
         error_correction=error_correction,
         border=border,
-        box_size=DEFAULT_BOX_SIZE,
+        box_size=box_size,
     )
     qr.add_data(url)
     qr.make(fit=True)
@@ -389,17 +487,30 @@ def _render_validated_request(
 
     if validated.output_format == "svg":
         if validated.overlay_path:
-            messages.append("Warning: overlay images are not supported for SVG output. Ignoring selected image.")
+            messages.append(
+                Notice(
+                    "logo_dropped_svg",
+                    "Warning: overlay images are not supported for SVG output. Ignoring selected image.",
+                )
+            )
         if validated.style != DEFAULT_STYLE:
             messages.append(
-                f"Warning: style {validated.style!r} is only supported for raster output. Generating square SVG."
+                Notice(
+                    "style_dropped_svg",
+                    f"Warning: style {validated.style!r} is only supported for raster output. Generating square SVG.",
+                    style=validated.style,
+                )
             )
         img = qrcode.make(validated.url, image_factory=qrcode.image.svg.SvgImage)
-        if save_output:
+        if save_output and validated.output_path is not None:
             try:
                 img.save(validated.output_path)
             except OSError as exc:
-                raise QRGenerationError(f"Failed to save output '{validated.output_path}': {exc}") from exc
+                raise QRGenerationError(
+                    f"Failed to save output '{validated.output_path}': {exc}",
+                    code="save_failed",
+                    reason=str(exc),
+                ) from exc
         return QRGenerationResult(
             output_path=validated.output_path,
             output_format=validated.output_format,
@@ -420,7 +531,12 @@ def _render_validated_request(
         img = None
         selected_border = None
         for border in OVERLAY_BORDER_CANDIDATES:
-            qr = build_qr(url=validated.url, error_correction=qrcode.constants.ERROR_CORRECT_H, border=border)
+            qr = build_qr(
+                url=validated.url,
+                error_correction=qrcode.constants.ERROR_CORRECT_H,
+                border=border,
+                box_size=validated.box_size,
+            )
             candidate_base = render_qr_image(qr=qr, style=validated.style, softness=validated.softness)
 
             if not can_decode_to_url(candidate_base, validated.url):
@@ -441,12 +557,24 @@ def _render_validated_request(
 
         if img is None:
             raise QRGenerationError(
-                "No validated overlay size produced a scannable QR. Try a simpler image or shorter URL."
+                "No validated overlay size produced a scannable QR. Try a simpler image or shorter URL.",
+                code="overlay_no_fit",
             )
         if selected_border != OVERLAY_BORDER_CANDIDATES[0]:
-            messages.append(f"Info: used quiet-zone border={selected_border} for decode-stable overlay validation.")
+            messages.append(
+                Notice(
+                    "border_widened",
+                    f"Info: used quiet-zone border={selected_border} for decode-stable overlay validation.",
+                    border=selected_border,
+                )
+            )
     else:
-        qr = build_qr(url=validated.url, error_correction=qrcode.constants.ERROR_CORRECT_M, border=DEFAULT_BORDER)
+        qr = build_qr(
+            url=validated.url,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            border=DEFAULT_BORDER,
+            box_size=validated.box_size,
+        )
         img = render_qr_image(qr=qr, style=validated.style, softness=validated.softness)
 
     if validated.output_format in ("jpeg", "jpg"):
@@ -454,22 +582,27 @@ def _render_validated_request(
 
     preview_image = img.copy() if include_preview else None
 
-    if save_output:
+    if save_output and validated.output_path is not None:
         try:
-            img.save(validated.output_path)
+            img.save(validated.output_path, format=PIL_ENCODERS[validated.output_format])
         except OSError as exc:
-            raise QRGenerationError(f"Failed to save output '{validated.output_path}': {exc}") from exc
+            raise QRGenerationError(
+                f"Failed to save output '{validated.output_path}': {exc}",
+                code="save_failed",
+                reason=str(exc),
+            ) from exc
 
     return QRGenerationResult(
         output_path=validated.output_path,
         output_format=validated.output_format,
         messages=messages,
         preview_image=preview_image,
+        pixel_size=img.size,
     )
 
 
 def render_qr_preview(request: QRRequest) -> QRGenerationResult:
-    validated = validate_request(request)
+    validated = validate_request(request, require_output_path=False)
     return _render_validated_request(validated, include_preview=True, save_output=False)
 
 

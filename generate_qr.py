@@ -1,7 +1,15 @@
 import argparse
 import sys
 
-from qr_core import DEFAULT_SOFTNESS, DEFAULT_STYLE, QRGenerationError, QRRequest, SUPPORTED_STYLES, generate_qr_file
+from qr_core import (
+    BOX_SIZE_PRESETS,
+    DEFAULT_SOFTNESS,
+    DEFAULT_STYLE,
+    QRGenerationError,
+    QRRequest,
+    SUPPORTED_STYLES,
+    generate_qr_file,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,6 +40,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_SOFTNESS,
         help="Corner softness for rounded/smooth/diag_rounded styles in range [0.0, 0.5].",
     )
+    parser.add_argument(
+        "--size",
+        choices=sorted(BOX_SIZE_PRESETS, key=BOX_SIZE_PRESETS.get),
+        default="small",
+        help=(
+            "Output size for raster formats: small (~330px), medium (~660px), "
+            "or large (~1320px) for a short URL. SVG output always scales."
+        ),
+    )
     return parser
 
 
@@ -48,6 +65,7 @@ def main() -> None:
                 style=args.style,
                 softness=args.softness,
                 overlay_scope="project_root",
+                box_size=BOX_SIZE_PRESETS[args.size],
             )
         )
     except QRGenerationError as exc:

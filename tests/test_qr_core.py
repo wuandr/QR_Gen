@@ -6,11 +6,13 @@ from unittest.mock import patch
 from PIL import Image
 
 from qr_core import (
+    BOX_SIZE_PRESETS,
     DEFAULT_SOFTNESS,
     QRGenerationError,
     QRRequest,
     generate_qr_file,
     load_overlay_image,
+    render_qr_preview,
 )
 
 
@@ -51,6 +53,40 @@ class QRCoreTests(unittest.TestCase):
             self.assertTrue(output.exists())
             self.assertEqual(result.output_format, "svg")
             self.assertEqual(len(result.messages), 2)
+
+    def test_explicit_format_overrides_the_path_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "code.svg"
+            result = generate_qr_file(
+                QRRequest(url="https://example.com", output_path=output, output_format="png")
+            )
+            self.assertEqual(result.output_format, "png")
+            with Image.open(output) as written:
+                self.assertEqual(written.format, "PNG")
+
+    def test_preview_needs_no_output_path(self) -> None:
+        result = render_qr_preview(QRRequest(url="https://example.com", output_format="png"))
+        self.assertIsNone(result.output_path)
+        self.assertIsNotNone(result.preview_image)
+        self.assertEqual(result.pixel_size, result.preview_image.size)
+
+    def test_saving_without_an_output_path_raises(self) -> None:
+        with self.assertRaises(QRGenerationError):
+            generate_qr_file(QRRequest(url="https://example.com", output_format="png"))
+
+    def test_box_size_scales_the_output(self) -> None:
+        small = render_qr_preview(
+            QRRequest(url="https://example.com", output_format="png", box_size=BOX_SIZE_PRESETS["small"])
+        )
+        large = render_qr_preview(
+            QRRequest(url="https://example.com", output_format="png", box_size=BOX_SIZE_PRESETS["large"])
+        )
+        ratio = BOX_SIZE_PRESETS["large"] // BOX_SIZE_PRESETS["small"]
+        self.assertEqual(large.pixel_size[0], small.pixel_size[0] * ratio)
+
+    def test_out_of_range_box_size_raises(self) -> None:
+        with self.assertRaises(QRGenerationError):
+            render_qr_preview(QRRequest(url="https://example.com", output_format="png", box_size=0))
 
     def test_invalid_softness_raises_structured_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
