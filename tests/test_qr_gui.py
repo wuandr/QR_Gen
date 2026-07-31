@@ -1,3 +1,5 @@
+import shutil
+import tempfile
 import tkinter as tk
 import unittest
 from pathlib import Path
@@ -9,11 +11,15 @@ from PIL import Image
 from i18n import LANGUAGES
 from qr_core import QRGenerationError, QRGenerationResult
 from qr_gui import (
+    ALL_FORMATS,
     CJK_FONT_CANDIDATES,
     DEFAULT_SIZE,
+    DISCLOSURE_LAYOUTS,
     default_filename,
     normalise_url,
     QRGeneratorApp,
+    SOFTNESS_STYLES,
+    STYLES,
 )
 
 
@@ -81,6 +87,89 @@ class QRGuiTests(unittest.TestCase):
         self.assertEqual(self.app.size_var.get(), DEFAULT_SIZE)
         self.assertEqual(self.app.overlay_path_var.get(), "")
 
+    def test_address_heading_shares_the_row_with_the_language_picker(self) -> None:
+        """It reads as two stacked rows otherwise, and costs a row of height."""
+        combo = self.app.language_combo
+        header = combo.master
+        heading = [
+            child
+            for child in header.winfo_children()
+            if str(child.cget("style")) == "Heading.TLabel"
+        ]
+        self.assertEqual(len(heading), 1, "the address heading should live in the header")
+        self.assertEqual(heading[0].cget("text"), self.t("field.url.label"))
+        self.assertEqual(heading[0].grid_info()["row"], combo.grid_info()["row"])
+
+    def test_address_heading_lines_up_with_the_entry_it_labels(self) -> None:
+        self.root.update_idletasks()
+        self.root.update()
+        heading = [
+            child
+            for child in self.app.language_combo.master.winfo_children()
+            if str(child.cget("style")) == "Heading.TLabel"
+        ][0]
+        self.assertEqual(heading.winfo_rootx(), self.app.url_entry.winfo_rootx())
+
+    def test_no_option_combination_can_clip_the_form(self) -> None:
+        """The minimum was measured in the default state, which is one of the
+        shortest: picking a rounded style swapped a one-line reason for the
+        taller rounding slider and pushed the last hint out of view."""
+        form = self.app.url_entry.master
+        for language in ("en", "zh_TW"):
+            self.app.set_language(language)
+            self.root.update_idletasks()
+            width, height = self.root.wm_minsize()
+            self.root.geometry(f"{width}x{height}")
+            for output_format in ALL_FORMATS:
+                for style in STYLES:
+                    with self.subTest(language=language, format=output_format, style=style):
+                        self.app.format_var.set(output_format)
+                        self.app.style_var.set(style)
+                        self.root.update_idletasks()
+                        self.root.update()
+                        self.assertLessEqual(
+                            form.winfo_reqheight(),
+                            form.winfo_height(),
+                            "the form needs more height than the window allows",
+                        )
+
+    def test_measuring_the_minimum_leaves_the_users_selection_alone(self) -> None:
+        self.app.format_var.set("svg")
+        self.app.style_var.set("dot")
+        self.app._set_minimum_size()
+        self.assertEqual(self.app.format_var.get(), "svg")
+        self.assertEqual(self.app.style_var.get(), "dot")
+
+    def test_a_long_url_does_not_wrap_the_hint_onto_a_second_line(self) -> None:
+        """A wrapped hint grows the form, and the window minimum cannot grow with it."""
+        self.app.url_var.set("example.com")
+        self.root.update_idletasks()
+        one_line = self.app.url_hint.winfo_reqheight()
+
+        self.app.url_var.set("example.com/" + "a" * 400)
+        self.root.update_idletasks()
+        self.assertEqual(self.app.url_hint.winfo_reqheight(), one_line)
+
+    def test_an_elided_url_keeps_both_ends(self) -> None:
+        elided = self.app._elide("https://example.com/" + "a" * 200 + "/checkout")
+        self.assertTrue(elided.startswith("https://example.com/"))
+        self.assertTrue(elided.endswith("checkout"))
+        self.assertIn("…", elided)
+
+    def test_short_urls_are_shown_in_full(self) -> None:
+        self.assertEqual(
+            self.app._elide("https://example.com"), "https://example.com"
+        )
+
+    def test_the_probe_styles_still_exercise_the_rounding_slider(self) -> None:
+        """DISCLOSURE_LAYOUTS names a style by hand; if the sets are re-cut so
+        that style no longer shows the slider, the measurement silently stops
+        covering the tallest layout."""
+        probed = {style for _, style in DISCLOSURE_LAYOUTS}
+        self.assertTrue(probed & SOFTNESS_STYLES, "no probe shows the rounding slider")
+        self.assertTrue(probed - SOFTNESS_STYLES, "no probe shows the rounding reason")
+        self.assertIn("svg", {fmt for fmt, _ in DISCLOSURE_LAYOUTS})
+
     def test_save_is_available_from_the_start(self) -> None:
         """The old Preview-before-Save gate is gone; Save must never be disabled."""
         self.assertNotIn("disabled", self.app.save_button.state())
@@ -138,6 +227,54 @@ class QRGuiTests(unittest.TestCase):
         self.assertEqual(self.app.logo_reason.cget("text"), self.t("logo.na_svg"))
         self.assertFalse(self._is_visible(self.app.rounding_frame))
 
+    def _a_logo(self) -> str:
+        """A real file on disk — the chip opens it, so a bare path will not do."""
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        path = Path(directory) / "logo.png"
+        Image.new("RGB", (64, 64), "red").save(path)
+        return str(path)
+
+    def test_svg_greys_out_both_logo_buttons(self) -> None:
+        self.app.overlay_path_var.set(self._a_logo())
+        self.app.format_var.set("svg")
+        self.root.update_idletasks()
+
+        self.assertIn("disabled", self.app.logo_choose_button.state())
+        self.assertIn("disabled", self.app.logo_remove_button.state())
+
+    def test_leaving_svg_restores_both_logo_buttons(self) -> None:
+        self.app.overlay_path_var.set(self._a_logo())
+        self.app.format_var.set("svg")
+        self.app.format_var.set("png")
+        self.root.update_idletasks()
+
+        self.assertNotIn("disabled", self.app.logo_choose_button.state())
+        self.assertNotIn("disabled", self.app.logo_remove_button.state())
+
+    def test_remove_stays_grey_on_svg_across_a_language_change(self) -> None:
+        """Remove depends on two facts — logo set, and format able to carry one.
+        While _render_logo_chip also owned the button, a language change re-ran
+        it and re-enabled Remove on SVG."""
+        self.app.overlay_path_var.set(self._a_logo())
+        self.app.format_var.set("svg")
+        self.app.set_language("zh_TW")
+        self.root.update_idletasks()
+
+        self.assertIn("disabled", self.app.logo_remove_button.state())
+
+    def test_remove_is_grey_until_there_is_a_logo_to_remove(self) -> None:
+        self.root.update_idletasks()
+        self.assertIn("disabled", self.app.logo_remove_button.state())
+
+        self.app.overlay_path_var.set(self._a_logo())
+        self.root.update_idletasks()
+        self.assertNotIn("disabled", self.app.logo_remove_button.state())
+
+        self.app.overlay_path_var.set("")
+        self.root.update_idletasks()
+        self.assertIn("disabled", self.app.logo_remove_button.state())
+
     def test_svg_reason_is_stated_once_not_twice(self) -> None:
         """Regression: the Look section and the rounding row both printed
         'SVG files are always square', one under the other."""
@@ -167,6 +304,26 @@ class QRGuiTests(unittest.TestCase):
         self.assertEqual(self.app.format_hint.cget("text"), self.t("format.svg.hint"))
 
     # --------------------------------------------------------------- input
+
+    def test_empty_field_explains_what_the_address_is_for(self) -> None:
+        """The label is now a plain noun, so the hint row carries the meaning."""
+        self.assertEqual(self.app.url_hint.cget("text"), self.t("field.url.hint_empty"))
+
+    def test_the_explainer_gives_way_to_the_scheme_hint(self) -> None:
+        self.app.url_var.set("example.com")
+        self.root.update_idletasks()
+        self.assertNotEqual(self.app.url_hint.cget("text"), self.t("field.url.hint_empty"))
+
+        self.app.url_var.set("   ")
+        self.root.update_idletasks()
+        self.assertEqual(self.app.url_hint.cget("text"), self.t("field.url.hint_empty"))
+
+    def test_the_explainer_follows_the_language(self) -> None:
+        self.app.set_language("zh_TW")
+        self.root.update_idletasks()
+        self.assertEqual(
+            self.app.url_hint.cget("text"), self.app.tr.t("field.url.hint_empty")
+        )
 
     def test_scheme_hint_appears_for_a_bare_domain(self) -> None:
         self.app.url_var.set("example.com")

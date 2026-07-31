@@ -36,6 +36,16 @@ ACCEPTED_EXTENSIONS = {"png": {".png"}, "jpeg": {".jpg", ".jpeg"}, "svg": {".svg
 STYLES = ("square", "dot", "rounded", "smooth", "diag_rounded")
 SOFTNESS_STYLES = {"rounded", "smooth", "diag_rounded"}
 
+# The distinct layouts the disclosure rules can produce, as (format, style). The
+# window minimum is measured against all of them, so no later selection can make
+# the form taller than the space it was given. Listed rather than derived: if a
+# new rule adds a taller layout, this is the one place that has to learn about it.
+DISCLOSURE_LAYOUTS = (
+    ("png", "square"),    # rounding slider replaced by a one-line reason
+    ("png", "rounded"),   # rounding slider shown — the tallest of the three
+    ("svg", "square"),    # SVG reasons shown, size hint blank
+)
+
 SIZES = ("small", "medium", "large")
 DEFAULT_SIZE = "medium"
 
@@ -152,6 +162,7 @@ class QRGeneratorApp(ttk.Frame):
         self._render_thread: threading.Thread | None = None
         self._save_thread: threading.Thread | None = None
         self._rerender_queued = False
+        self._measuring = False
 
         # Deferred display state, re-rendered whenever the language changes.
         self._banner: tuple[str, list[tuple[str, dict]]] = (NEUTRAL, [("status.empty", {})])
@@ -271,16 +282,25 @@ class QRGeneratorApp(ttk.Frame):
         self._build_action_bar()
 
     def _build_header(self) -> None:
-        """The language picker lives in the window, not only in the menu bar.
+        """The address heading on the left, the language picker on the right.
 
-        On macOS the menu bar sits at the top of the screen rather than in the
-        window, so a menu-only switcher is effectively undiscoverable. A
-        combobox here behaves the same on macOS, Windows and Linux.
+        The picker lives in the window, not only in the menu bar: on macOS the
+        menu bar sits at the top of the screen rather than in the window, so a
+        menu-only switcher is effectively undiscoverable. A combobox here behaves
+        the same on macOS, Windows and Linux.
+
+        The heading shares this row rather than starting the form below it. The
+        picker sets the row height whatever else is in it, so a heading on its own
+        row underneath was pure vertical cost. Column 0 spans the form, so the
+        heading still lines up with the entry it labels.
         """
         header = ttk.Frame(self)
-        header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 4))
         header.columnconfigure(0, weight=1)
 
+        self.tr.bind(ttk.Label(header, style="Heading.TLabel"), "text", "field.url.label").grid(
+            row=0, column=0, sticky="w"
+        )
         self.tr.bind(ttk.Label(header, style="Hint.TLabel"), "text", "menu.language").grid(
             row=0, column=1, sticky="e", padx=(0, 8)
         )
@@ -302,13 +322,10 @@ class QRGeneratorApp(ttk.Frame):
         form.columnconfigure(0, weight=1)
         row = 0
 
-        # Web address
-        self.tr.bind(ttk.Label(form, style="Heading.TLabel"), "text", "field.url.label").grid(
-            row=row, column=0, sticky="w"
-        )
-        row += 1
+        # Web address. Its heading sits in the header row, beside the language
+        # picker, so the form starts at the entry — see _build_header.
         self.url_entry = ttk.Entry(form, textvariable=self.url_var)
-        self.url_entry.grid(row=row, column=0, sticky="ew", pady=(4, 2))
+        self.url_entry.grid(row=row, column=0, sticky="ew", pady=(0, 2))
         row += 1
         self.url_hint = ttk.Label(form, style="Hint.TLabel")
         self.url_hint.grid(row=row, column=0, sticky="w")
@@ -493,9 +510,34 @@ class QRGeneratorApp(ttk.Frame):
         self.master.bind("<Escape>", lambda _event: self.focus_set())
 
     def _set_minimum_size(self) -> None:
-        """Derive the minimum from real content so nothing can be clipped."""
+        """Derive the minimum from the tallest layout the user can reach.
+
+        Measuring whatever happens to be on screen is not enough. The rounding
+        slider is taller than the one-line reason it replaces, so a minimum taken
+        in the default square state left the form ~27px short the moment a
+        rounded style was picked — enough to clip the last hint in Chinese, where
+        the line height is larger. English had just enough slack to hide it.
+        """
+        style, output_format = self.style_var.get(), self.format_var.get()
+        self._measuring = True
+        try:
+            width = height = 0
+            for probe_format, probe_style in DISCLOSURE_LAYOUTS:
+                self.format_var.set(probe_format)
+                self.style_var.set(probe_style)
+                self._apply_disclosure()
+                self._render_format_hint()
+                self.master.update_idletasks()
+                width = max(width, self.master.winfo_reqwidth())
+                height = max(height, self.master.winfo_reqheight())
+            self.format_var.set(output_format)
+            self.style_var.set(style)
+            self._apply_disclosure()
+            self._render_format_hint()
+        finally:
+            self._measuring = False
         self.master.update_idletasks()
-        self.master.minsize(self.master.winfo_reqwidth(), self.master.winfo_reqheight())
+        self.master.minsize(width, height)
 
     def _autowrap(self, container: tk.Misc, *labels: ttk.Label, reserve: int = 8) -> None:
         """Wrap text to the container's width instead of a fixed pixel guess.
@@ -576,12 +618,37 @@ class QRGeneratorApp(ttk.Frame):
         self.scan_badge.configure(text=f"{icon} {self.tr.t(self._badge)}", foreground=colour)
 
     def _render_url_hint(self) -> None:
+        """Explains the field while it is empty, then reports any scheme we added.
+
+        The label is the only thing telling a first-time user that this address is
+        where a *scanner* ends up, not where the file gets saved, so it earns the
+        row whenever there is nothing more specific to say.
+        """
         raw = self.url_var.get()
+        if not raw.strip():
+            self.url_hint.configure(text=self.tr.t("field.url.hint_empty"))
+            return
         normalised = normalise_url(raw)
         if normalised and normalised != raw.strip():
-            self.url_hint.configure(text=self.tr.t("field.url.hint_scheme", url=normalised))
+            self.url_hint.configure(
+                text=self.tr.t("field.url.hint_scheme", url=self._elide(normalised))
+            )
         else:
             self.url_hint.configure(text="")
+
+    def _elide(self, url: str, limit: int = 48) -> str:
+        """Keep a URL echo on one line, cutting the middle rather than the end.
+
+        The window minimum is fixed, so a hint that wraps to a second line pushes
+        the bottom of the form out of view — a long enough address could hide the
+        file-type hint entirely. The start and end of a URL are the parts worth
+        showing: the start carries the scheme this hint exists to confirm, the end
+        carries the page.
+        """
+        if len(url) <= limit:
+            return url
+        keep = (limit - 1) // 2
+        return f"{url[:keep]}…{url[-keep:]}"
 
     def _render_logo_chip(self) -> None:
         path = self.overlay_path_var.get().strip()
@@ -589,10 +656,8 @@ class QRGeneratorApp(ttk.Frame):
             self._logo_photo = None
             self.logo_thumb.configure(image="")
             self.logo_name.configure(text=self.tr.t("logo.none"))
-            self.logo_remove_button.state(["disabled"])
             return
         self.logo_name.configure(text=Path(path).name)
-        self.logo_remove_button.state(["!disabled"])
         try:
             with Image.open(path) as image:
                 thumb = image.convert("RGBA")
@@ -640,6 +705,10 @@ class QRGeneratorApp(ttk.Frame):
         messagebox.showinfo(self.tr.t("dialog.about.title"), self.tr.t("dialog.about.body"))
 
     def _on_form_change(self, *_args: object) -> None:
+        # _set_minimum_size drives the format and style vars through every
+        # layout to measure them. Those writes are not the user's.
+        if self._measuring:
+            return
         self._apply_disclosure()
         self._render_url_hint()
         self._render_format_hint()
@@ -671,7 +740,15 @@ class QRGeneratorApp(ttk.Frame):
             self.rounding_frame.grid_remove()
         self._set_reason(self.rounding_reason, rounding_reason)
 
+        # Both logo buttons are owned here, not in _render_logo_chip, because
+        # Remove depends on two things at once — whether a logo is set and
+        # whether the format can carry one. Split across two functions, whichever
+        # ran last would win, and a language change re-runs both.
+        has_logo = bool(self.overlay_path_var.get().strip())
         self.logo_choose_button.state(["disabled"] if is_svg else ["!disabled"])
+        self.logo_remove_button.state(
+            ["disabled"] if is_svg or not has_logo else ["!disabled"]
+        )
         self._set_reason(self.logo_reason, "logo.na_svg" if is_svg else None)
 
         for button in self.size_buttons:

@@ -65,8 +65,8 @@ The GUI supports:
 - **Live preview** — the code re-renders as you type, roughly 300ms after you stop. There is no Preview button and no stale-preview state.
 - **Scan check** — every preview is decoded back and reports whether it scans.
 - **Size** — Small / Medium / Large (about 330 / 660 / 1320 px for a short URL), with the exact output size shown under the preview. Defaults to Medium.
-- **File format** — PNG, JPEG, or SVG. The format you pick decides what gets written, regardless of the extension you type in the save dialog.
-- **Look** — square, dots, rounded, smooth, or diagonal modules, with a corner-rounding slider for the styles that use it.
+- **File type** — PNG, JPEG, or SVG. The type you pick decides what gets written, regardless of the extension you type in the save dialog.
+- **Appearance** — square, dots, rounded, smooth, or diagonal modules, with a corner-rounding slider for the styles that use it.
 - **Logo** — drop an image into the middle of the code from anywhere on disk. The app finds the largest placement that still scans.
 - **Languages** — English and 繁體中文 (Traditional Chinese, Taiwan). Switch from the picker at the top right of the window or the Language menu; either updates the whole interface immediately. The choice is remembered in `~/.qr_generator.json`.
 

@@ -44,11 +44,12 @@ STRINGS: dict[str, dict[str, str]] = {
             "Every code is checked to make sure it still scans."
         ),
         # Web address
-        "field.url.label": "Where should this code go?",
+        "field.url.label": "Web address",
         "field.url.placeholder": "https://example.com",
+        "field.url.hint_empty": "People who scan this code will be taken here.",
         "field.url.hint_scheme": "We'll use {url}",
         # Look
-        "section.look": "Look",
+        "section.look": "Appearance",
         "style.square": "Square",
         "style.dot": "Dots",
         "style.rounded": "Rounded",
@@ -74,7 +75,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "size.readout": "{format} · {w} × {h} px",
         "size.readout_svg": "SVG · scales to any size",
         # File format
-        "section.file": "File",
+        "section.file": "File type",
         "format.png": "PNG",
         "format.jpeg": "JPEG",
         "format.svg": "SVG",
@@ -142,8 +143,9 @@ STRINGS: dict[str, dict[str, str]] = {
             "每個 QR Code 都會經過檢查，確認可以掃描。"
         ),
         # Web address
-        "field.url.label": "這個 QR Code 要連到哪裡？",
+        "field.url.label": "網址",
         "field.url.placeholder": "https://example.com",
+        "field.url.hint_empty": "掃描這個 QR Code 的人會前往這個網址。",
         "field.url.hint_scheme": "將使用 {url}",
         # Look
         "section.look": "外觀",
