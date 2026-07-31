@@ -68,7 +68,7 @@ The GUI supports:
 - **File format** — PNG, JPEG, or SVG. The format you pick decides what gets written, regardless of the extension you type in the save dialog.
 - **Look** — square, dots, rounded, smooth, or diagonal modules, with a corner-rounding slider for the styles that use it.
 - **Logo** — drop an image into the middle of the code from anywhere on disk. The app finds the largest placement that still scans.
-- **Languages** — English and 繁體中文 (Traditional Chinese, Taiwan), switchable from the Language menu. The choice is remembered in `~/.qr_generator.json`.
+- **Languages** — English and 繁體中文 (Traditional Chinese, Taiwan). Switch from the picker at the top right of the window or the Language menu; either updates the whole interface immediately. The choice is remembered in `~/.qr_generator.json`.
 
 Keyboard: `Cmd/Ctrl+S` saves, `Cmd/Ctrl+R` starts over, `Return` saves, `Esc` clears focus.
 
@@ -80,9 +80,16 @@ changing Size never slows down typing.
 All user-visible text lives in [`i18n.py`](i18n.py), keyed by stable string IDs.
 To add a language, add one table to `STRINGS` and one entry to `LANGUAGES`;
 `tests/test_i18n.py` checks that every language covers every ID and uses the same
-named placeholders. Note that Tk needs a system font covering the script — this
-is fine on macOS and Windows, but a minimal Linux image may need a CJK font
-installed for 繁體中文 to render.
+named placeholders.
+
+Tk draws characters its font does not cover as empty boxes rather than falling
+back, so `CJK_FONT_CANDIDATES` in [`qr_gui.py`](qr_gui.py) names a per-platform
+font for Chinese/Japanese/Korean (PingFang TC on macOS, Microsoft JhengHei UI on
+Windows, Noto Sans CJK on Linux). The first installed candidate is applied on
+switching and the platform default is restored on switching back. If a language
+needs a script the default UI font lacks, add candidates there too — and note
+that a minimal Linux image may have none of them installed, in which case the
+text still renders as boxes.
 
 ## CLI Usage
 

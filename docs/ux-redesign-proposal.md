@@ -415,8 +415,13 @@ exists.
   implementations for modest gain.
 - **Style thumbnails as rendered mini-QRs** — a labelled radio row fixes the
   naming problem (H2) without five renders and a cache at startup.
-- **Header language dropdown** — the Language menu covers it in one place.
 - Phase 3 in full: app icon, dark mode, colour options, recent URLs.
+
+I also cut the header language dropdown from §5.2, on the grounds that the
+Language menu covered it. That was wrong and it was put back: on macOS the menu
+bar is at the top of the *screen*, not the window, so a menu-only switcher is
+effectively invisible. The picker now sits at the top right of the window, and
+the menu remains as a second route.
 
 ### Found during implementation
 
@@ -440,9 +445,27 @@ Engine errors and notices now carry stable codes (`QRGenerationError.code`,
 `Notice.code`) so the GUI maps failures onto its own copy instead of matching
 English message text — which would have broken the moment the UI was translated.
 
+### Fixed after first use
+
+Three things surfaced the moment the app was actually run, all now covered by
+tests:
+
+1. **No language switcher in the window.** See above.
+2. **"SVG files are always square" printed twice**, once under Look and again in
+   the rounding row. The rounding row has three states, not two — slider, reason,
+   or nothing — and SVG is the third.
+3. **CJK font coverage is now handled, not just noted.** Tk renders missing
+   glyphs as empty boxes instead of falling back to another font, so
+   `CJK_FONT_CANDIDATES` names a per-platform face (PingFang TC / Microsoft
+   JhengHei UI / Noto Sans CJK) that is applied on switching and reverted on
+   switching back. Menu-bar cascades are also located by their menu widget
+   rather than a build-time index, since macOS inserts its own application menu
+   ahead of them.
+
 ### Still open
 
 - `test_cat_face_1024.ppm` (3 MB) is still committed as the sample image.
 - The packaged app still has no icon (`icon=None` in `qr_gui.spec`).
-- The Linux CI bundle has not been checked for a font with Traditional Chinese
-  coverage; strings will render as boxes if none is present.
+- The font fallback is only as good as what is installed: a minimal Linux image
+  with none of the Noto CJK candidates will still show boxes. Worth confirming
+  against the packaged Linux artifact before release.

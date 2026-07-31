@@ -1,12 +1,20 @@
 import tkinter as tk
 import unittest
 from pathlib import Path
+from tkinter import font as tkfont
 from unittest.mock import patch
 
 from PIL import Image
 
+from i18n import LANGUAGES
 from qr_core import QRGenerationError, QRGenerationResult
-from qr_gui import DEFAULT_SIZE, default_filename, normalise_url, QRGeneratorApp
+from qr_gui import (
+    CJK_FONT_CANDIDATES,
+    DEFAULT_SIZE,
+    default_filename,
+    normalise_url,
+    QRGeneratorApp,
+)
 
 
 class PureHelperTests(unittest.TestCase):
@@ -129,6 +137,28 @@ class QRGuiTests(unittest.TestCase):
         self.assertEqual(self.app.style_reason.cget("text"), self.t("field.rounding.na_svg"))
         self.assertEqual(self.app.logo_reason.cget("text"), self.t("logo.na_svg"))
         self.assertFalse(self._is_visible(self.app.rounding_frame))
+
+    def test_svg_reason_is_stated_once_not_twice(self) -> None:
+        """Regression: the Look section and the rounding row both printed
+        'SVG files are always square', one under the other."""
+        self.app.format_var.set("svg")
+        self.root.update_idletasks()
+
+        message = self.t("field.rounding.na_svg")
+        showing = [
+            name
+            for name in ("style_reason", "rounding_reason", "logo_reason")
+            if self._is_visible(getattr(self.app, name))
+            and getattr(self.app, name).cget("text") == message
+        ]
+        self.assertEqual(showing, ["style_reason"])
+
+    def test_rounding_row_is_empty_for_svg(self) -> None:
+        self.app.style_var.set("rounded")
+        self.app.format_var.set("svg")
+        self.root.update_idletasks()
+        self.assertFalse(self._is_visible(self.app.rounding_frame))
+        self.assertFalse(self._is_visible(self.app.rounding_reason))
 
     def test_format_hint_follows_the_selection(self) -> None:
         self.assertEqual(self.app.format_hint.cget("text"), self.t("format.png.hint"))
@@ -334,6 +364,127 @@ class QRGuiTests(unittest.TestCase):
         self.assertEqual(request.box_size, 40)
 
     # ------------------------------------------------------------ language
+
+    def test_language_switcher_is_in_the_window(self) -> None:
+        """The menu bar lives at the top of the screen on macOS, so a menu-only
+        switcher is undiscoverable. There must be one in the window itself."""
+        self.assertTrue(self._is_visible(self.app.language_combo))
+        self.assertEqual(set(self.app.language_combo.cget("values")), set(LANGUAGES.values()))
+        self.assertEqual(self.app.language_display_var.get(), LANGUAGES["en"])
+
+    def test_selecting_in_the_combobox_switches_language(self) -> None:
+        self.app.language_display_var.set(LANGUAGES["zh_TW"])
+        self.app._on_language_selected()
+        self.root.update_idletasks()
+
+        self.assertEqual(self.app.tr.language, "zh_TW")
+        self.assertEqual(self.app.save_button.cget("text"), self.app.tr.t("button.save"))
+
+    def test_both_switchers_stay_in_step(self) -> None:
+        self.app.set_language("zh_TW")
+        self.assertEqual(self.app.language_var.get(), "zh_TW")
+        self.assertEqual(self.app.language_display_var.get(), LANGUAGES["zh_TW"])
+
+    def test_menu_bar_cascades_are_labelled_and_translated(self) -> None:
+        menubar = self.app._menubar
+
+        def labels() -> list[str]:
+            last = menubar.index("end")
+            return [
+                menubar.entrycget(i, "label")
+                for i in range(last + 1)
+                if menubar.type(i) == "cascade"
+            ]
+
+        self.assertEqual(labels(), [self.t("menu.file"), self.t("menu.language"), self.t("menu.help")])
+        self.app.set_language("zh_TW")
+        translated = self.app.tr.t
+        self.assertEqual(
+            labels(),
+            [translated("menu.file"), translated("menu.language"), translated("menu.help")],
+        )
+
+    def test_cascades_are_found_by_menu_not_by_a_stored_index(self) -> None:
+        """macOS inserts its own application menu, shifting build-time indices."""
+        for menu, _string_id in self.app._cascade_menus:
+            self.assertIsNotNone(self.app._cascade_index(menu))
+
+    # ---------------------------------------------------------------- fonts
+
+    def test_latin_languages_keep_the_platform_font(self) -> None:
+        self.assertIsNone(self.app.font_family_for_language("en"))
+
+    def test_cjk_languages_get_a_font_that_covers_the_script(self) -> None:
+        """Tk draws missing glyphs as boxes rather than falling back."""
+        family = self.app.font_family_for_language("zh_TW")
+        if family is None:
+            self.skipTest("no CJK font installed on this machine")
+        self.assertIn(family, CJK_FONT_CANDIDATES[self.app._platform_key()])
+        self.assertIn(family, tkfont.families(self.app))
+
+    def test_switching_away_from_cjk_restores_the_default_font(self) -> None:
+        original = tkfont.nametofont("TkDefaultFont").cget("family")
+        self.app.set_language("zh_TW")
+        self.app.set_language("en")
+        self.assertEqual(tkfont.nametofont("TkDefaultFont").cget("family"), original)
+
+    def test_disclosure_text_follows_the_language(self) -> None:
+        """Regression: reason labels are written imperatively by
+        _apply_disclosure, so they kept the language they were written in.
+        Reproduced by selecting SVG and then switching language."""
+        self.app.format_var.set("svg")
+        self.root.update_idletasks()
+        self.app.set_language("zh_TW")
+        self.root.update_idletasks()
+
+        translated = self.app.tr.t
+        self.assertEqual(self.app.style_reason.cget("text"), translated("field.rounding.na_svg"))
+        self.assertEqual(self.app.logo_reason.cget("text"), translated("logo.na_svg"))
+        self.assertEqual(self.app.format_hint.cget("text"), translated("format.svg.hint"))
+
+    def test_square_rounding_reason_follows_the_language(self) -> None:
+        self.app.set_language("zh_TW")
+        self.root.update_idletasks()
+        self.assertEqual(
+            self.app.rounding_reason.cget("text"), self.app.tr.t("field.rounding.na_square")
+        )
+
+    def test_size_hint_stays_blank_for_svg_across_a_language_change(self) -> None:
+        """The hint had two owners — a binding and _apply_disclosure — so the
+        binding restored text that SVG had deliberately cleared."""
+        self.app.format_var.set("svg")
+        self.root.update_idletasks()
+        self.assertEqual(self.app.size_hint.cget("text"), "")
+
+        self.app.set_language("zh_TW")
+        self.root.update_idletasks()
+        self.assertEqual(self.app.size_hint.cget("text"), "")
+
+    def test_preview_note_follows_the_language(self) -> None:
+        self.app.set_language("zh_TW")
+        self.root.update_idletasks()
+        self.assertEqual(
+            self.app.preview_label.cget("text"), self.app.tr.t("preview.placeholder")
+        )
+
+    def test_readout_format_name_is_not_frozen_at_render_time(self) -> None:
+        """Deferred state stores a StringId, not an already-translated string."""
+        self.app._job_id = 1
+        result = QRGenerationResult(
+            output_path=None,
+            output_format="png",
+            preview_image=Image.new("RGB", (40, 40), "white"),
+            pixel_size=(330, 330),
+        )
+        self.app._queue.put(("render_ok", 1, (result, True)))
+        self.app._process_queue()
+
+        self.app.set_language("zh_TW")
+        translated = self.app.tr.t
+        self.assertEqual(
+            self.app.size_readout.cget("text"),
+            translated("size.readout", format=translated("format.png"), w=660, h=660),
+        )
 
     def test_switching_language_retranslates_the_interface(self) -> None:
         english_save = self.app.save_button.cget("text")

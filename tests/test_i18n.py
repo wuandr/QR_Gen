@@ -3,7 +3,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from i18n import DEFAULT_LANGUAGE, LANGUAGES, STRINGS, Translator, load_language, save_language
+from i18n import (
+    DEFAULT_LANGUAGE,
+    LANGUAGES,
+    STRINGS,
+    StringId,
+    Translator,
+    load_language,
+    save_language,
+)
 
 
 PLACEHOLDER = re.compile(r"\{(\w+)\}")
@@ -43,6 +51,16 @@ class TranslatorTests(unittest.TestCase):
 
     def test_missing_parameter_does_not_raise(self) -> None:
         self.assertIn("{path}", Translator().t("status.saved"))
+
+    def test_string_id_parameters_are_translated_at_render_time(self) -> None:
+        translator = Translator("zh_TW")
+        rendered = translator.t("notice.format_corrected", format=StringId("format.png"))
+        self.assertIn(STRINGS["zh_TW"]["format.png"], rendered)
+        self.assertNotIn("format.png", rendered)
+
+    def test_plain_string_parameters_are_left_alone(self) -> None:
+        rendered = Translator().t("status.saved", path="format.png")
+        self.assertIn("format.png", rendered)
 
     def test_unknown_language_falls_back_to_the_default(self) -> None:
         translator = Translator("kl_ZZ")

@@ -221,6 +221,15 @@ STRINGS: dict[str, dict[str, str]] = {
 }
 
 
+class StringId(str):
+    """A parameter value that is itself a string ID, translated when rendered.
+
+    Lets deferred state hold ``t("size.readout", format=StringId("format.png"))``
+    without freezing the parameter into the language that was current when the
+    state was stored.
+    """
+
+
 class _SafeDict(dict):
     """Leaves unknown placeholders intact instead of raising at render time."""
 
@@ -256,7 +265,11 @@ class Translator:
             return string_id
         if not params:
             return template
-        return template.format_map(_SafeDict(params))
+        resolved = {
+            key: self.t(value) if isinstance(value, StringId) else value
+            for key, value in params.items()
+        }
+        return template.format_map(_SafeDict(resolved))
 
     def observe(self, callback: Callable[[], None]) -> None:
         """Register something to re-run on every language change."""

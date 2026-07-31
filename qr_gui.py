@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 from PIL import Image, ImageTk
 
-from i18n import LANGUAGES, Translator, load_language, save_language
+from i18n import LANGUAGES, StringId, Translator, load_language, save_language
 from qr_core import (
     BOX_SIZE_PRESETS,
     DEFAULT_SOFTNESS,
@@ -50,6 +50,27 @@ PREVIEW_BOX_SIZE = 10
 # takes ~4ms and a logo render ~190ms, so no spinner is warranted.
 DEBOUNCE_MS = 300
 POLL_MS = 50
+
+# Tk renders missing glyphs as empty boxes rather than falling back, so a
+# language whose script the default UI font does not cover needs a font chosen
+# for it. Listed best-first per platform; the first installed one wins, and if
+# none is present we keep the default rather than failing.
+CJK_FONT_CANDIDATES = {
+    "darwin": ("PingFang TC", "Heiti TC", "Apple LiGothic", "Arial Unicode MS"),
+    "win32": ("Microsoft JhengHei UI", "Microsoft JhengHei", "MingLiU", "SimSun"),
+    "other": (
+        "Noto Sans CJK TC",
+        "Noto Sans CJK SC",
+        "Noto Sans TC",
+        "WenQuanYi Zen Hei",
+        "AR PL UMing TW",
+        "Droid Sans Fallback",
+    ),
+}
+# Languages whose script needs the fallback above, by language-code prefix.
+CJK_LANGUAGE_PREFIXES = ("zh", "ja", "ko")
+# The Tk named fonts every widget class derives from.
+NAMED_FONTS = ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont")
 
 NEUTRAL, WORKING, SUCCESS, PROBLEM = "neutral", "working", "success", "problem"
 BANNER_ICONS = {NEUTRAL: "", WORKING: "", SUCCESS: "✓", PROBLEM: "⚠"}
@@ -114,6 +135,7 @@ class QRGeneratorApp(ttk.Frame):
         self.size_var = tk.StringVar(value=DEFAULT_SIZE)
         self.overlay_path_var = tk.StringVar()
         self.language_var = tk.StringVar(value=self.tr.language)
+        self.language_display_var = tk.StringVar(value=LANGUAGES[self.tr.language])
 
         # Render state. A job token replaces the old preview-signature gate:
         # results whose token is stale are dropped, so the preview is always
@@ -135,13 +157,14 @@ class QRGeneratorApp(ttk.Frame):
         self._banner: tuple[str, list[tuple[str, dict]]] = (NEUTRAL, [("status.empty", {})])
         self._readout: tuple[str, dict] | None = None
         self._badge: str | None = None
+        self._preview_note: str | None = "preview.placeholder"
 
         self._init_styles()
+        self._apply_font_for_language()  # the saved language may not be Latin-script
         self._build_menu()
         self._build_layout()
-        self._register_observers()
+        self._register_observers()  # also performs the first render of each
         self._bind_events()
-        self._apply_disclosure()
         self._clear_preview()
         self._set_minimum_size()
         self.after(POLL_MS, self._process_queue)
@@ -160,6 +183,11 @@ class QRGeneratorApp(ttk.Frame):
         self._heading_font.configure(weight="bold")
         self._hint_font = base.copy()
         self._hint_font.configure(size=smaller)
+        # Remembered so switching back to a Latin-script language restores the
+        # platform's own UI font rather than leaving a CJK face behind.
+        self._default_families = {
+            name: tkfont.nametofont(name).cget("family") for name in self._available_named_fonts()
+        }
 
         style = ttk.Style()
         style.configure("Heading.TLabel", font=self._heading_font)
@@ -167,20 +195,47 @@ class QRGeneratorApp(ttk.Frame):
         style.configure("Banner.TLabel", font=base)
         style.configure("Readout.TLabel", font=self._hint_font, foreground="#5f6368")
 
+    def _available_named_fonts(self) -> tuple[str, ...]:
+        """Not every Tk build defines every named font."""
+        defined = set(self.tk.splitlist(self.tk.call("font", "names")))
+        return tuple(name for name in NAMED_FONTS if name in defined)
+
+    def font_family_for_language(self, language: str) -> str | None:
+        """The family to use for `language`, or None to keep the platform default."""
+        if not language.startswith(CJK_LANGUAGE_PREFIXES):
+            return None
+        installed = set(tkfont.families(self))
+        for candidate in CJK_FONT_CANDIDATES.get(self._platform_key(), ()):
+            if candidate in installed:
+                return candidate
+        return None  # nothing suitable installed; the default is the best we have
+
+    def _apply_font_for_language(self) -> None:
+        chosen = self.font_family_for_language(self.tr.language)
+        for name in self._available_named_fonts():
+            family = chosen or self._default_families.get(name)
+            if family:
+                tkfont.nametofont(name).configure(family=family)
+        for font in (self._heading_font, self._hint_font):
+            family = chosen or self._default_families.get("TkDefaultFont")
+            if family:
+                font.configure(family=family)
+
     def _build_menu(self) -> None:
         modifier = "Cmd" if sys.platform == "darwin" else "Ctrl"
         menubar = tk.Menu(self.master)
-        # Cascade indices are recorded as we go: a menubar's first usable index
-        # is not 0 on every platform.
-        self._cascades: dict[str, int] = {}
+        # Cascades are found by their menu widget rather than by an index
+        # recorded at build time: macOS adds its own application menu to the
+        # menu bar, which shifts every index after it.
+        self._cascade_menus: list[tuple[tk.Menu, str]] = []
 
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(command=self.start_save, accelerator=f"{modifier}+S")
         file_menu.add_command(command=self.reset_defaults, accelerator=f"{modifier}+R")
         file_menu.add_separator()
         file_menu.add_command(command=self.master.destroy)
-        menubar.add_cascade(menu=file_menu)
-        self._cascades["menu.file"] = menubar.index("end")
+        menubar.add_cascade(menu=file_menu, label=self.tr.t("menu.file"))
+        self._cascade_menus.append((file_menu, "menu.file"))
 
         language_menu = tk.Menu(menubar, tearoff=0)
         for code, name in LANGUAGES.items():
@@ -190,13 +245,13 @@ class QRGeneratorApp(ttk.Frame):
                 variable=self.language_var,
                 command=lambda c=code: self.set_language(c),
             )
-        menubar.add_cascade(menu=language_menu)
-        self._cascades["menu.language"] = menubar.index("end")
+        menubar.add_cascade(menu=language_menu, label=self.tr.t("menu.language"))
+        self._cascade_menus.append((language_menu, "menu.language"))
 
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(command=self._show_about)
-        menubar.add_cascade(menu=help_menu)
-        self._cascades["menu.help"] = menubar.index("end")
+        menubar.add_cascade(menu=help_menu, label=self.tr.t("menu.help"))
+        self._cascade_menus.append((help_menu, "menu.help"))
 
         self.master.configure(menu=menubar)
         self._menubar = menubar
@@ -208,15 +263,42 @@ class QRGeneratorApp(ttk.Frame):
         self.master.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=3, uniform="cols")
         self.columnconfigure(1, weight=2, uniform="cols")
-        self.rowconfigure(0, weight=1)
+        self.rowconfigure(1, weight=1)
 
+        self._build_header()
         self._build_form()
         self._build_preview()
         self._build_action_bar()
 
+    def _build_header(self) -> None:
+        """The language picker lives in the window, not only in the menu bar.
+
+        On macOS the menu bar sits at the top of the screen rather than in the
+        window, so a menu-only switcher is effectively undiscoverable. A
+        combobox here behaves the same on macOS, Windows and Linux.
+        """
+        header = ttk.Frame(self)
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        header.columnconfigure(0, weight=1)
+
+        self.tr.bind(ttk.Label(header, style="Hint.TLabel"), "text", "menu.language").grid(
+            row=0, column=1, sticky="e", padx=(0, 8)
+        )
+        self.language_combo = ttk.Combobox(
+            header,
+            textvariable=self.language_display_var,
+            # Each language is listed in its own script, the usual convention:
+            # someone who only reads Chinese still has to recognise their entry.
+            values=tuple(LANGUAGES.values()),
+            state="readonly",
+            width=14,
+        )
+        self.language_combo.grid(row=0, column=2, sticky="e")
+        self.language_combo.bind("<<ComboboxSelected>>", self._on_language_selected)
+
     def _build_form(self) -> None:
         form = ttk.Frame(self)
-        form.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
+        form.grid(row=1, column=0, sticky="nsew", padx=(0, 16))
         form.columnconfigure(0, weight=1)
         row = 0
 
@@ -308,8 +390,9 @@ class QRGeneratorApp(ttk.Frame):
             button.grid(row=0, column=column, sticky="w", padx=(0, 12))
             self.size_buttons.append(button)
         row += 1
+        # Text owned by _apply_disclosure, which blanks it for SVG. Binding it
+        # here as well would let the binding overwrite that on a language change.
         self.size_hint = ttk.Label(form, style="Hint.TLabel")
-        self.tr.bind(self.size_hint, "text", "size.large_hint")
         self.size_hint.grid(row=row, column=0, sticky="w", pady=(4, 0))
         row += 1
 
@@ -341,7 +424,7 @@ class QRGeneratorApp(ttk.Frame):
 
     def _build_preview(self) -> None:
         preview = ttk.Frame(self)
-        preview.grid(row=0, column=1, sticky="nsew")
+        preview.grid(row=1, column=1, sticky="nsew")
         # Reserve the preview's full size up front. Without this the window's
         # minimum jumps the moment the first code renders, and it can no longer
         # shrink back to the size it started at.
@@ -358,7 +441,7 @@ class QRGeneratorApp(ttk.Frame):
 
     def _build_action_bar(self) -> None:
         bar = ttk.Frame(self)
-        bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(16, 0))
+        bar.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(16, 0))
         bar.columnconfigure(0, weight=1)
 
         self.banner_label = ttk.Label(bar, style="Banner.TLabel", anchor="w")
@@ -380,13 +463,19 @@ class QRGeneratorApp(ttk.Frame):
         bar.bind("<Configure>", self._wrap_banner, add="+")
 
     def _register_observers(self) -> None:
-        """Anything whose text depends on live state re-renders on language change."""
+        """Anything whose text depends on live state re-renders on language change.
+
+        Every label written imperatively rather than bound to a string ID must be
+        registered here, or it keeps whatever language it was written in.
+        """
         self.tr.observe(self._render_banner)
         self.tr.observe(self._render_readout)
         self.tr.observe(self._render_badge)
         self.tr.observe(self._render_url_hint)
         self.tr.observe(self._render_logo_chip)
         self.tr.observe(self._render_format_hint)
+        self.tr.observe(self._render_preview_note)
+        self.tr.observe(self._apply_disclosure)
         self.tr.observe(self._render_title)
 
     def _bind_events(self) -> None:
@@ -447,8 +536,21 @@ class QRGeneratorApp(ttk.Frame):
         self._file_menu.entryconfigure(1, label=self.tr.t("menu.file.reset"))
         self._file_menu.entryconfigure(3, label=self.tr.t("menu.file.quit"))
         self._help_menu.entryconfigure(0, label=self.tr.t("menu.help.about"))
-        for string_id, index in self._cascades.items():
-            self._menubar.entryconfigure(index, label=self.tr.t(string_id))
+        for menu, string_id in self._cascade_menus:
+            index = self._cascade_index(menu)
+            if index is not None:
+                self._menubar.entryconfigure(index, label=self.tr.t(string_id))
+
+    def _cascade_index(self, menu: tk.Menu) -> int | None:
+        last = self._menubar.index("end")
+        if last is None:
+            return None
+        for index in range(last + 1):
+            if self._menubar.type(index) != "cascade":
+                continue
+            if self._menubar.entrycget(index, "menu") == str(menu):
+                return index
+        return None
 
     def _render_banner(self) -> None:
         state, parts = self._banner
@@ -504,6 +606,11 @@ class QRGeneratorApp(ttk.Frame):
     def _render_format_hint(self) -> None:
         self.format_hint.configure(text=self.tr.t(f"format.{self.format_var.get()}.hint"))
 
+    def _render_preview_note(self) -> None:
+        if self._preview_note is None:
+            return  # an image is showing
+        self.preview_label.configure(image="", text=self.tr.t(self._preview_note))
+
     def _set_banner(self, state: str, string_id: str, **params: object) -> None:
         self._set_banner_parts(state, [(string_id, params)])
 
@@ -515,9 +622,19 @@ class QRGeneratorApp(ttk.Frame):
 
     def set_language(self, language: str) -> None:
         self.tr.set_language(language)
+        # Keep both switchers in step: either one can be the origin of a change.
         self.language_var.set(self.tr.language)
+        self.language_display_var.set(LANGUAGES[self.tr.language])
+        self._apply_font_for_language()
         save_language(self.tr.language)
         self._set_minimum_size()
+
+    def _on_language_selected(self, _event: tk.Event | None = None) -> None:
+        chosen = self.language_display_var.get()
+        for code, name in LANGUAGES.items():
+            if name == chosen:
+                self.set_language(code)
+                return
 
     def _show_about(self) -> None:
         messagebox.showinfo(self.tr.t("dialog.about.title"), self.tr.t("dialog.about.body"))
@@ -542,20 +659,17 @@ class QRGeneratorApp(ttk.Frame):
             button.state(["disabled"] if is_svg else ["!disabled"])
         self._set_reason(self.style_reason, "field.rounding.na_svg" if is_svg else None)
 
-        if is_svg:
-            rounding_reason = "field.rounding.na_svg"
-        elif style not in SOFTNESS_STYLES:
-            rounding_reason = "field.rounding.na_square"
-        else:
-            rounding_reason = None
+        # Three states, not two: show the slider, show a reason, or show nothing.
+        # For SVG the Look section above already says "SVG files are always
+        # square", so repeating it here just prints the same sentence twice.
+        show_rounding = not is_svg and style in SOFTNESS_STYLES
+        rounding_reason = None if (is_svg or show_rounding) else "field.rounding.na_square"
 
-        if rounding_reason is None:
-            self.rounding_reason.grid_remove()
+        if show_rounding:
             self.rounding_frame.grid()
         else:
             self.rounding_frame.grid_remove()
-            self.rounding_reason.grid()
-            self.rounding_reason.configure(text=self.tr.t(rounding_reason))
+        self._set_reason(self.rounding_reason, rounding_reason)
 
         self.logo_choose_button.state(["disabled"] if is_svg else ["!disabled"])
         self._set_reason(self.logo_reason, "logo.na_svg" if is_svg else None)
@@ -747,7 +861,7 @@ class QRGeneratorApp(ttk.Frame):
         notices = self._notice_ids(result)
 
         if result.output_format == "svg":
-            self._clear_preview(self.tr.t("preview.svg"))
+            self._clear_preview("preview.svg")
             self._readout = ("size.readout_svg", {})
             self._badge = None
         else:
@@ -756,7 +870,7 @@ class QRGeneratorApp(ttk.Frame):
             width, height = self._output_pixel_size(result.pixel_size)
             self._readout = (
                 "size.readout",
-                {"format": self.tr.t(f"format.{result.output_format}"), "w": width, "h": height},
+                {"format": StringId(f"format.{result.output_format}"), "w": width, "h": height},
             )
             self._badge = "status.scan_ok" if scans else "status.scan_warn" if scans is False else None
         self._render_readout()
@@ -773,7 +887,7 @@ class QRGeneratorApp(ttk.Frame):
         parts = [("status.saved", {"path": friendly_path(self._saved_path)})]
         if corrected:
             parts.append(
-                ("notice.format_corrected", {"format": self.tr.t(f"format.{result.output_format}")})
+                ("notice.format_corrected", {"format": StringId(f"format.{result.output_format}")})
             )
         self._set_banner_parts(SUCCESS, parts)
 
@@ -800,6 +914,7 @@ class QRGeneratorApp(ttk.Frame):
         shown = image.copy()
         shown.thumbnail(PREVIEW_SIZE, Image.Resampling.LANCZOS)
         self._preview_photo = ImageTk.PhotoImage(shown)
+        self._preview_note = None  # an image is showing, so there is no text
         self.preview_label.configure(image=self._preview_photo, text="")
 
     def _dim_preview(self) -> None:
@@ -809,12 +924,13 @@ class QRGeneratorApp(ttk.Frame):
         faded = self._last_preview.convert("RGB")
         self._paint(Image.blend(faded, Image.new("RGB", faded.size, "white"), 0.55))
 
-    def _clear_preview(self, note: str | None = None) -> None:
+    def _clear_preview(self, note_id: str = "preview.placeholder") -> None:
         self._preview_photo = None
         self._last_preview = None
         self._readout = None
         self._badge = None
-        self.preview_label.configure(image="", text=note or self.tr.t("preview.placeholder"))
+        self._preview_note = note_id
+        self._render_preview_note()
         self._render_readout()
         self._render_badge()
 
